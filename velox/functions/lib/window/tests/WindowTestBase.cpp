@@ -192,6 +192,130 @@ void WindowTestBase::testWindowFunction(
   assertQuery(queryInfo.planNode, expectedResult);
 }
 
+void WindowTestBase::testKRangeFrames(const std::string& function) {
+  vector_size_t size = 20;
+
+  auto rangeFrameTest = [&](const VectorPtr& startColumn,
+                            const VectorPtr& endColumn,
+                            const std::string& overClause,
+                            const std::string& veloxFrame,
+                            const std::string& duckFrame) {
+    auto vectors = makeRowVector({
+        makeFlatVector<int32_t>(size, [](auto row) { return row % 5; }),
+        makeFlatVector<int64_t>(size, [](auto row) { return row; }),
+        startColumn,
+        endColumn,
+    });
+    createDuckDbTable({vectors});
+
+    std::string veloxFunction =
+        fmt::format("{} over ({} {})", function, overClause, veloxFrame);
+    std::string duckFunction =
+        fmt::format("{} over ({} {})", function, overClause, duckFrame);
+    auto op = PlanBuilder()
+                  .setParseOptions(options_)
+                  .values({vectors})
+                  .window({veloxFunction})
+                  .planNode();
+
+    auto rowType = asRowType(vectors->type());
+    std::string columnsString = folly::join(", ", rowType->names());
+    std::string querySql =
+        fmt::format("SELECT {}, {} FROM tmp", columnsString, duckFunction);
+    SCOPED_TRACE(veloxFunction);
+    assertQuery(op, querySql);
+  };
+
+  // For frames with k RANGE PRECEDING/FOLLOWING, Velox requires the application
+  // to add columns with the range frame boundary value computed according
+  // to the frame type.
+  // If the frame is k PRECEDING :
+  // frame_boundary_value = current_order_by - k (for ascending ORDER BY)
+  // frame_boundary_value = current_order_by + k (for descending ORDER BY)
+  // If the frame is k FOLLOWING :
+  // frame_boundary_value = current_order_by + k (for ascending ORDER BY)
+  // frame_boundary_value = current_order_by - k (for descending ORDER BY)
+
+  // The test-cases below cover different variations of k PRECEDING/k FOLLOWING
+  // with ascending and descending ORDER BY.
+  std::string overClause = "partition by c0 order by c1";
+  std::string descOverClause = "partition by c0 order by c1 desc";
+
+  // Computed frame boundary columns for asc/desc ORDER BY.
+  auto startColumn =
+      makeFlatVector<int64_t>(size, [](auto row) { return row - 4; });
+  auto descStartColumn =
+      makeFlatVector<int64_t>(size, [](auto row) { return row + 4; });
+  auto endColumn =
+      makeFlatVector<int64_t>(size, [](auto row) { return row + 2; });
+  auto descEndColumn =
+      makeFlatVector<int64_t>(size, [](auto row) { return row - 2; });
+
+  // The Velox window function requires a frame column whereas DuckDB can use
+  // the SQL window frame it represents.
+  std::string veloxFrame = "range between c2 preceding and c3 following";
+  std::string duckFrame = "range between 4 preceding and 2 following";
+  rangeFrameTest(startColumn, endColumn, overClause, veloxFrame, duckFrame);
+  rangeFrameTest(
+      descStartColumn, descEndColumn, descOverClause, veloxFrame, duckFrame);
+
+  duckFrame = "range between 4 preceding and current row";
+  veloxFrame = "range between c2 preceding and current row";
+  rangeFrameTest(startColumn, endColumn, overClause, veloxFrame, duckFrame);
+  rangeFrameTest(
+      descStartColumn, descEndColumn, descOverClause, veloxFrame, duckFrame);
+
+  // There are no rows between 2 preceding and 4 preceding frames. So this tests
+  // empty frames.
+  duckFrame = "range between 4 preceding and 2 preceding";
+  veloxFrame = "range between c2 preceding and c3 preceding";
+  endColumn = makeFlatVector<int64_t>(size, [](auto row) { return row - 2; });
+  descEndColumn =
+      makeFlatVector<int64_t>(size, [](auto row) { return row + 2; });
+  rangeFrameTest(startColumn, endColumn, overClause, veloxFrame, duckFrame);
+  rangeFrameTest(
+      descStartColumn, descEndColumn, descOverClause, veloxFrame, duckFrame);
+
+  // There is exactly one row in the frames between 2 and 6 preceding values.
+  startColumn = makeFlatVector<int64_t>(size, [](auto row) { return row - 6; });
+  descStartColumn =
+      makeFlatVector<int64_t>(size, [](auto row) { return row + 6; });
+  duckFrame = "range between 6 preceding and 2 preceding";
+  rangeFrameTest(startColumn, endColumn, overClause, veloxFrame, duckFrame);
+  rangeFrameTest(
+      descStartColumn, descEndColumn, descOverClause, veloxFrame, duckFrame);
+
+  // There are no rows between 2 and 4 following frames. So this tests empty
+  // frames.
+  duckFrame = "range between 2 following and 4 following";
+  veloxFrame = "range between c2 following and c3 following";
+  startColumn = makeFlatVector<int64_t>(size, [](auto row) { return row + 2; });
+  descStartColumn =
+      makeFlatVector<int64_t>(size, [](auto row) { return row - 2; });
+  endColumn = makeFlatVector<int64_t>(size, [](auto row) { return row + 4; });
+  descEndColumn =
+      makeFlatVector<int64_t>(size, [](auto row) { return row - 4; });
+  rangeFrameTest(startColumn, endColumn, overClause, veloxFrame, duckFrame);
+  rangeFrameTest(
+      descStartColumn, descEndColumn, descOverClause, veloxFrame, duckFrame);
+
+  duckFrame = "range between current row and 4 following";
+  veloxFrame = "range between current row and c3 following";
+  rangeFrameTest(startColumn, endColumn, overClause, veloxFrame, duckFrame);
+  rangeFrameTest(
+      descStartColumn, descEndColumn, descOverClause, veloxFrame, duckFrame);
+
+  // There is exactly one row between 2 and 6 following frame values.
+  duckFrame = "range between 2 following and 6 following";
+  veloxFrame = "range between c2 following and c3 following";
+  endColumn = makeFlatVector<int64_t>(size, [](auto row) { return row + 6; });
+  descEndColumn =
+      makeFlatVector<int64_t>(size, [](auto row) { return row - 6; });
+  rangeFrameTest(startColumn, endColumn, overClause, veloxFrame, duckFrame);
+  rangeFrameTest(
+      descStartColumn, descEndColumn, descOverClause, veloxFrame, duckFrame);
+}
+
 void WindowTestBase::assertWindowFunctionError(
     const std::vector<RowVectorPtr>& input,
     const std::string& function,
