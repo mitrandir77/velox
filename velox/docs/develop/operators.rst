@@ -515,11 +515,13 @@ UnnestNode
 ~~~~~~~~~~
 
 The unnest operation expands arrays and maps into separate columns. Arrays are
-expanded into a single column, and maps are expanded into two columns
-(key, value). Can be used to expand multiple columns. In this case produces as
-many rows as the highest cardinality array or map (the other columns are padded
-with nulls). Optionally can produce an ordinality column that specifies the row
-number starting with 1.
+expanded into a single column with the exception of arrays of rows. Arrays of
+ROW type are recursively un-nested i.e each column from the ROW type is expanded
+into a separate output column. Maps are expanded into two columns (key, value).
+Can be used to expand multiple columns. In this case produces as many rows as
+the highest cardinality array or map (the other columns are padded with nulls).
+Optionally can produce an ordinality column that specifies the row number
+starting with 1.
 
 .. list-table::
    :widths: 10 30
@@ -533,9 +535,11 @@ number starting with 1.
    * - unnestVariables
      - Input columns of type array or map to expand.
    * - unnestNames
-     - Names to use for expanded columns. One name per array column. Two names per map column.
+     - Names to use for expanded columns. One name per array column. Two names per map column. If array of rows (and not legacyUnnest), then one column per child type of the row.
    * - ordinalityName
      - Optional name for the ordinality column.
+   * - legacyUnnest
+     - Array of rows are typically expanded to multiple columns, one for each child type of the row. However, with legacyUnnest, array of rows (like other array types) are expanded to a single column of the row type.
 
 .. _TableWriteNode:
 

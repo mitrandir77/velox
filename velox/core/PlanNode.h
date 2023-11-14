@@ -1834,28 +1834,59 @@ class LimitNode : public PlanNode {
 };
 
 /// Expands arrays and maps into separate columns. Arrays are expanded into a
-/// single column, and maps are expanded into two columns (key, value). Can be
-/// used to expand multiple columns. In this case will produce as many rows as
-/// the highest cardinality array or map (the other columns are padded with
-/// nulls). Optionally can produce an ordinality column that specifies the row
-/// number starting with 1.
+/// single column with the exception of arrays of rows.
+/// Arrays of ROW type (if not legacyUnnest) are recursively un-nested
+/// i.e each column from the ROW type is expanded into a separate output column.
+/// With legacyUnnest, arrays of ROW type are expanded into a single column as
+/// well.
+/// Maps are expanded into two columns (key, value).
+/// Can be used to expand multiple columns. In this case will produce as many
+/// rows as the highest cardinality array or map (the other columns are padded
+/// with nulls).
+/// Optionally can produce an ordinality column that specifies the row number
+/// starting with 1.
 class UnnestNode : public PlanNode {
  public:
   /// @param replicateVariables Inputs that are projected as is
   /// @param unnestVariables Inputs that are unnested. Must be of type ARRAY or
   /// MAP.
   /// @param unnestNames Names to use for unnested outputs: one name for each
-  /// array (element); two names for each map (key and value). The output names
-  /// must appear in the same order as unnestVariables.
+  /// array (element) except for array (row), which would have as many names
+  /// as the cardinality of the row type; two names for each map (key and
+  /// value).
+  /// The output names must appear in the same order as unnestVariables.
   /// @param ordinalityName Optional name for the ordinality columns. If not
   /// present, ordinality column is not produced.
+  /// @param legacyUnnest Array of rows are typically expanded to multiple
+  /// columns, one for each child type of the row. However, with legacyUnnest,
+  /// array of rows (like other array types) are expanded to a single column of
+  /// the row type.
   UnnestNode(
       const PlanNodeId& id,
       std::vector<FieldAccessTypedExprPtr> replicateVariables,
       std::vector<FieldAccessTypedExprPtr> unnestVariables,
       const std::vector<std::string>& unnestNames,
       const std::optional<std::string>& ordinalityName,
+      bool legacyUnnest,
       const PlanNodePtr& source);
+
+#ifdef VELOX_ENABLE_BACKWARD_COMPATIBILITY
+  UnnestNode(
+      const PlanNodeId& id,
+      std::vector<FieldAccessTypedExprPtr> replicateVariables,
+      std::vector<FieldAccessTypedExprPtr> unnestVariables,
+      const std::vector<std::string>& unnestNames,
+      const std::optional<std::string>& ordinalityName,
+      const PlanNodePtr& source)
+      : UnnestNode(
+            id,
+            replicateVariables,
+            unnestVariables,
+            unnestNames,
+            ordinalityName,
+            true,
+            source) {}
+#endif
 
   /// The order of columns in the output is: replicated columns (in the order
   /// specified), unnested columns (in the order specified, for maps: key comes
@@ -1880,6 +1911,10 @@ class UnnestNode : public PlanNode {
     return withOrdinality_;
   }
 
+  bool legacyUnnest() const {
+    return legacyUnnest_;
+  }
+
   std::string_view name() const override {
     return "Unnest";
   }
@@ -1894,6 +1929,7 @@ class UnnestNode : public PlanNode {
   const std::vector<FieldAccessTypedExprPtr> replicateVariables_;
   const std::vector<FieldAccessTypedExprPtr> unnestVariables_;
   const bool withOrdinality_;
+  const bool legacyUnnest_;
   const std::vector<PlanNodePtr> sources_;
   RowTypePtr outputType_;
 };

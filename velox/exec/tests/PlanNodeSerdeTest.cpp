@@ -408,6 +408,13 @@ TEST_F(PlanNodeSerdeTest, unnest) {
   plan =
       PlanBuilder().values({data}).unnest({"c0"}, {"c1"}, "ordinal").planNode();
   testSerde(plan);
+
+  // Plan without legacy unnest.
+  plan = PlanBuilder()
+             .values({data})
+             .unnest({"c0"}, {"c1"}, "ordinal", false)
+             .planNode();
+  testSerde(plan);
 }
 
 TEST_F(PlanNodeSerdeTest, values) {
