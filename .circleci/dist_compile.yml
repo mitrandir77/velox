@@ -617,11 +617,11 @@ jobs:
             python ./scripts/signature.py export --spark spark_pr_signatures.json
             python ./scripts/signature.py bias presto_merge_base_signatures.json presto_pr_signatures.json /tmp/presto_bias_functions
             retval=$?
-            if [ $retval -ne 0 ]; echo "Presto signature check failed" > /tmp/presto-signature-error-code ; fi
+            if [ $retval -ne 0 ]; then echo "Presto signature check failed" > /tmp/presto-signature-error-code ; fi
             
             python ./scripts/signature.py bias spark_merge_base_signatures.json spark_pr_signatures.json /tmp/spark_bias_functions
             retval=$?
-            if [ $retval -ne 0 ]; echo "Spark signature check failed" > /tmp/spark-signature-error-code ; fi
+            if [ $retval -ne 0 ]; then echo "Spark signature check failed" > /tmp/spark-signature-error-code ; fi
 
       - store_artifacts:
           path: 'presto_merge_base_signatures.json'
