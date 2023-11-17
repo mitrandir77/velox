@@ -616,7 +616,13 @@ jobs:
             python ./scripts/signature.py export --presto presto_pr_signatures.json
             python ./scripts/signature.py export --spark spark_pr_signatures.json
             python ./scripts/signature.py bias presto_merge_base_signatures.json presto_pr_signatures.json /tmp/presto_bias_functions
+            retval=$?
+            if [ $retval -ne 0 ]; echo "Presto signature check failed" > /tmp/presto-signature-error-code ; fi
+            
             python ./scripts/signature.py bias spark_merge_base_signatures.json spark_pr_signatures.json /tmp/spark_bias_functions
+            retval=$?
+            if [ $retval -ne 0 ]; echo "Spark signature check failed" > /tmp/spark-signature-error-code ; fi
+
       - store_artifacts:
           path: 'presto_merge_base_signatures.json'
       - store_artifacts:
@@ -648,8 +654,13 @@ jobs:
           fuzzer_name: "Spark Bias Run"
           fuzzer_exe: "if [ -f /tmp/spark_bias_functions ];  then _build/debug/velox/expression/tests/spark_expression_fuzzer_test"
           fuzzer_args: " --seed ${RANDOM} --duration_sec 3600 --logtostderr=1 --minloglevel=0 \
-          --assign_function_tickets  $(cat /tmp/spark_bias_functions) \
-          --repro_persist_path=/tmp/spark_fuzzer_repro ; fi"
+                --assign_function_tickets  $(cat /tmp/spark_bias_functions) \
+                --repro_persist_path=/tmp/spark_fuzzer_repro ; fi"
+
+      - run:
+          name: "Surface only Presto function signature errors if any"
+          command: |
+              if [ -f /tmp/presto-signature-error-code ]; then return 1 ; fi
 
 
 workflows:
